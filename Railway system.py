@@ -42,8 +42,12 @@ def book_ticket(con):
         name = input("Name: ")
         age = int(input("Age: "))
         gender = input("Gender (M/F): ")
+        phone_number = int(input("Phone Number: "))
 
-        cursor.execute("INSERT INTO passenger (name, age, gender) VALUES (%s, %s, %s)", (name, age, gender))
+        cursor.execute(
+            "INSERT INTO passenger (name, age, gender, phone_number) VALUES (%s, %s, %s, %s)",
+            (name, age, gender, phone_number)
+        )
         con.commit()
 
         pid = cursor.lastrowid
@@ -58,14 +62,26 @@ def book_ticket(con):
         date = input("Enter Date of Journey (YYYY-MM-DD): ")
         seat = input("Enter Seat Number (e.g., A1-23): ")
 
-        query = """
-            INSERT INTO reservations (passenger_id, train_id, travel_date, seat_number)
-            VALUES (%s, %s, %s, %s)
+        check_query = """
+            SELECT * FROM reservations
+            WHERE train_id = %s AND travel_date = %s AND seat_number = %s
         """
-        print("📦 Using query:", query)  # Debug line
-        cursor.execute(query, (pid, tid, date, seat))
+        cursor.execute(check_query, (tid, date, seat))
+        existing = cursor.fetchone()
+
+        if existing:
+            status = "Waiting"
+            print("⚠️ Seat already booked! Your status is set to Waiting.")
+        else:
+            status = "Confirmed"
+
+        query = """
+            INSERT INTO reservations (passenger_id, train_id, travel_date, seat_number, booking_status)
+            VALUES (%s, %s, %s, %s, %s)
+        """
+        cursor.execute(query, (pid, tid, date, seat, status))
         con.commit()
-        print("✅ Ticket booked successfully!")
+        print(f"✅ Ticket booked successfully with status: {status}")
 
     except Exception as e:
         print("❌ Booking failed:", e)
