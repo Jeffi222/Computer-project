@@ -1,0 +1,2 @@
+mysql -u root -p < railway_system_setup.sql
+cd C:\Users\YourUsername\Downloads
