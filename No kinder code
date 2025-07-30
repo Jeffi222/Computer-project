@@ -1,0 +1,264 @@
+import mysql.connector
+import datetime
+
+def connect_db():
+    try:
+        conn = mysql.connector.connect(
+            host="localhost",
+            user="root",
+            password="1234",
+            database="Railway_mgmt"
+        )
+        print("Database connection successful!")
+        return conn
+    except mysql.connector.Error as err:
+        print(f"Error: Failed to connect to database: {err}")
+        return None
+
+def admin_login(username, password):
+    valid_users = ["jeffi", "nidhin", "eldho"]
+    if username.lower() in valid_users and password == "1234":
+        print(f"Admin '{username}' logged in successfully.")
+        return True
+    else:
+        print("Admin login failed: Invalid credentials.")
+        return False
+
+def add_train(train_name, source, destination):
+    if not all([train_name, source, destination]):
+        print("Error: All train fields are required.")
+        return False
+
+    con = connect_db()
+    if con:
+        try:
+            cur = con.cursor()
+            sql = "INSERT INTO trains (train_name, source, destination) VALUES (%s, %s, %s)"
+            cur.execute(sql, (train_name, source, destination))
+            con.commit()
+            print(f"Train '{train_name}' from {source} to {destination} added successfully!")
+            return True
+        except mysql.connector.Error as err:
+            print(f"Error adding train: {err}")
+            con.rollback()
+            return False
+        finally:
+            if cur: cur.close()
+            if con: con.close()
+    return False
+
+def update_train(train_id, new_train_name):
+    if not all([train_id, new_train_name]):
+        print("Error: Train ID and new name are required.")
+        return False
+
+    con = connect_db()
+    if con:
+        try:
+            cur = con.cursor()
+            sql = "UPDATE trains SET train_name=%s WHERE train_id=%s"
+            cur.execute(sql, (new_train_name, train_id))
+            con.commit()
+            if cur.rowcount > 0:
+                print(f"Train ID {train_id} updated to '{new_train_name}'.")
+                return True
+            else:
+                print(f"No train found with ID {train_id}.")
+                return False
+        except mysql.connector.Error as err:
+            print(f"Error updating train: {err}")
+            con.rollback()
+            return False
+        finally:
+            if cur: cur.close()
+            if con: con.close()
+    return False
+
+def delete_train(train_id):
+    if not train_id:
+        print("Error: Train ID is required for deletion.")
+        return False
+    
+    if not input(f"Are you sure you want to delete Train ID {train_id}? (yes/no): ").lower() == 'yes':
+        print("Train deletion cancelled.")
+        return False
+
+    con = connect_db()
+    if con:
+        try:
+            cur = con.cursor()
+            sql = "DELETE FROM trains WHERE train_id=%s"
+            cur.execute(sql, (train_id,))
+            con.commit()
+            if cur.rowcount > 0:
+                print(f"Train ID {train_id} deleted successfully.")
+                return True
+            else:
+                print(f"No train found with ID {train_id}.")
+                return False
+        except mysql.connector.Error as err:
+            print(f"Error deleting train: {err}")
+            con.rollback()
+            return False
+        finally:
+            if cur: cur.close()
+            if con: con.close()
+    return False
+
+def view_data(table_name, columns, condition=None, params=None):
+    con = connect_db()
+    if con:
+        try:
+            cur = con.cursor()
+            query = f"SELECT {', '.join(columns)} FROM {table_name}"
+            if condition:
+                query += f" WHERE {condition}"
+            
+            cur.execute(query, params)
+            rows = cur.fetchall()
+            return rows, columns
+        except mysql.connector.Error as err:
+            print(f"Error viewing data from {table_name}: {err}")
+            return [], []
+        finally:
+            if cur: cur.close()
+            if con: con.close()
+    return [], []
+
+def delete_generic(table_name, id_column, item_id):
+    if not item_id:
+        print(f"Error: {id_column.replace('_', ' ').title()} is required for deletion.")
+        return False
+
+    if not input(f"Are you sure you want to delete this {table_name[:-1]} with ID {item_id}? (yes/no): ").lower() == 'yes':
+        print(f"{table_name[:-1]} deletion cancelled.")
+        return False
+
+    con = connect_db()
+    if con:
+        try:
+            cur = con.cursor()
+            sql = f"DELETE FROM {table_name} WHERE {id_column}=%s"
+            cur.execute(sql, (item_id,))
+            con.commit()
+            if cur.rowcount > 0:
+                print(f"Deleted from {table_name}: ID {item_id}.")
+                return True
+            else:
+                print(f"No {table_name[:-1]} found with ID {item_id}.")
+                return False
+        except mysql.connector.Error as err:
+            print(f"Error deleting from {table_name}: {err}")
+            con.rollback()
+            return False
+        finally:
+            if cur: cur.close()
+            if con: con.close()
+    return False
+
+def book_ticket(p_name, p_age, p_gender, p_phone, train_id, travel_date_str, seat_num, coach_type):
+    if not all([p_name, p_age, p_gender, p_phone, train_id, travel_date_str, seat_num, coach_type]):
+        print("Error: All booking fields are required.")
+        return False, None
+
+    try:
+        p_age = int(p_age)
+        if p_age <= 0:
+            raise ValueError("Age must be a positive number.")
+        travel_date = datetime.date.fromisoformat(travel_date_str)
+    except ValueError as e:
+        print(f"Error: Invalid input: {e}. Age must be a number and Date must be YYYY-MM-DD.")
+        return False, None
+    
+    if coach_type not in ["AC", "Second AC", "Sleeper"]:
+        print("Error: Invalid coach type. Must be 'AC', 'Second AC', or 'Sleeper'.")
+        return False, None
+
+    con = connect_db()
+    if con:
+        try:
+            cur = con.cursor()
+            
+            cur.execute("INSERT INTO passenger (name, age, gender, phone_number) VALUES (%s, %s, %s, %s)",
+                        (p_name, p_age, p_gender, p_phone))
+            con.commit()
+            passenger_id = cur.lastrowid
+
+            cur.execute("""
+                SELECT * FROM reservations 
+                WHERE train_id=%s AND travel_date=%s AND seat_number=%s AND coach_type=%s
+            """, (train_id, travel_date, seat_num, coach_type))
+            existing_reservation = cur.fetchone()
+            booking_status = "Waiting" if existing_reservation else "Confirmed"
+
+            cur.execute("""
+                INSERT INTO reservations (passenger_id, train_id, travel_date, seat_number, booking_status, coach_type) 
+                VALUES (%s,%s,%s,%s,%s,%s)
+            """, (passenger_id, train_id, travel_date, seat_num, booking_status, coach_type))
+            con.commit()
+
+            print(f"Ticket booked successfully!\nPassenger ID: {passenger_id}\nBooking Status: {booking_status}")
+            return True, passenger_id
+        except mysql.connector.Error as err:
+            print(f"Error making reservation: {err}")
+            con.rollback()
+            return False, None
+        finally:
+            if cur: cur.close()
+            if con: con.close()
+    return False, None
+
+def view_user_reservation(passenger_id):
+    if not passenger_id:
+        print("Error: Passenger ID is required to view reservations.")
+        return [], []
+    
+    try:
+        passenger_id = int(passenger_id)
+    except ValueError:
+        print("Error: Passenger ID must be a number.")
+        return [], []
+
+    con = connect_db()
+    if con:
+        try:
+            cur = con.cursor()
+            query = """
+                SELECT
+                    r.reservation_id,
+                    r.passenger_id,
+                    t.train_name,
+                    t.source,
+                    t.destination,
+                    r.travel_date,
+                    r.seat_number,
+                    r.booking_status,
+                    r.coach_type
+                FROM
+                    reservations r
+                JOIN
+                    trains t ON r.train_id = t.train_id
+                WHERE
+                    r.passenger_id = %s
+            """
+            cur.execute(query, (passenger_id,))
+            rows = cur.fetchall()
+            cols = ["Reservation ID", "Passenger ID", "Train Name", "Source", "Destination",
+                    "Travel Date", "Seat Number", "Status", "Coach Type"]
+            
+            if not rows:
+                print(f"No reservations found for Passenger ID {passenger_id}.")
+            return rows, cols
+
+        except mysql.connector.Error as err:
+            print(f"Error fetching user reservations: {err}")
+            return [], []
+        finally:
+            if cur: cur.close()
+            if con: con.close()
+    return [], []
+
+if __name__ == "__main__":
+    print("--- Testing Core Railway Management System Logic ---")
+
+      
