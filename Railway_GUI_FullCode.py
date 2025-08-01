@@ -4,6 +4,7 @@ from tkinter import messagebox
 from tkinter import ttk
 import datetime
 
+# --- MySQL Connection ---
 def connect_db():
     try:
         return mysql.connector.connect(
@@ -16,6 +17,7 @@ def connect_db():
         messagebox.showerror("Database Connection Error", f"Failed to connect to database: {err}")
         return None
 
+# --- App Setup ---
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("dark-blue")
 
@@ -29,6 +31,7 @@ app.configure(fg_color="black")
 current_frame = None
 current_passenger_id = None
 
+# --- Frame Management Functions ---
 def clear_frame():
     global current_frame
     if current_frame:
@@ -58,6 +61,7 @@ def go_back(to_func):
 def logout():
     app.destroy()
 
+# --- Main Menu ---
 def main_menu():
     set_current_frame(lambda parent_frame: _create_main_menu_content(parent_frame))
 
@@ -74,6 +78,7 @@ def _create_main_menu_content(parent_frame):
     logout_btn = ctk.CTkButton(parent_frame, text="Exit App", fg_color="red", hover_color="#aa0000", corner_radius=20, width=250, height=60, command=logout)
     logout_btn.pack(pady=40)
 
+# --- Admin Login ---
 def admin_login_screen():
     set_current_frame(lambda parent_frame: _create_admin_login_content(parent_frame))
 
@@ -105,6 +110,7 @@ def _create_admin_login_content(parent_frame):
     back_btn = ctk.CTkButton(parent_frame, text="Back", corner_radius=20, command=lambda: go_back(main_menu))
     back_btn.pack()
 
+# --- Admin Menu ---
 def admin_menu():
     set_current_frame(lambda parent_frame: _create_admin_menu_content(parent_frame))
 
@@ -129,6 +135,7 @@ def _create_admin_menu_content(parent_frame):
         btn = ctk.CTkButton(parent_frame, text=name, command=func, width=250, height=50, corner_radius=20, fg_color=btn_color)
         btn.pack(pady=8)
 
+# --- ADMIN FUNCTIONS ---
 def add_train():
     set_current_frame(lambda parent_frame: _create_add_train_content(parent_frame))
 
@@ -310,15 +317,18 @@ def __create_delete_generic_content(parent_frame, table_name, id_column, back_fu
     ctk.CTkButton(parent_frame, text="Delete", command=do_delete).pack(pady=10)
     ctk.CTkButton(parent_frame, text="Go Back", command=lambda: go_back(back_func)).pack()
 
+# --- USER FUNCTIONS ---
 def user_menu():
     set_current_frame(lambda parent_frame: _create_user_menu_content(parent_frame))
 
 def _create_user_menu_content(parent_frame):
     ctk.CTkLabel(parent_frame, text="Welcome, Passenger", font=("Arial", 26), text_color="white").pack(pady=30)
 
-    ctk.CTkButton(parent_frame, text="Book Ticket", command=book_ticket).pack(pady=10)
-    ctk.CTkButton(parent_frame, text="View My Reservation", command=view_user_reservation).pack(pady=10)
-    ctk.CTkButton(parent_frame, text="Go Back", command=lambda: go_back(main_menu)).pack(pady=10)
+    ctk.CTkButton(parent_frame, text="Book Ticket", command=book_ticket, width=250, height=50).pack(pady=10)
+    
+    ctk.CTkButton(parent_frame, text="View My Reservation", command=view_user_reservation, width=250, height=50).pack(pady=10)
+    
+    ctk.CTkButton(parent_frame, text="Go Back", command=lambda: go_back(main_menu), width=250, height=50).pack(pady=10)
 
 def book_ticket():
     set_current_frame(lambda parent_frame: _create_book_ticket_content(parent_frame))
@@ -514,6 +524,7 @@ def _create_view_user_reservation_content(parent_frame):
     ctk.CTkButton(parent_frame, text="View", command=fetch_user_reservations).pack(pady=10)
     ctk.CTkButton(parent_frame, text="Go Back", command=lambda: go_back(user_menu)).pack(pady=10)
 
+# --- Shared Table Display Functions ---
 def _show_table(query, cols, back_func):
     set_current_frame(lambda parent_frame: __create_show_table_content(parent_frame, query, cols, back_func))
 
@@ -594,6 +605,7 @@ def _show_table_data(rows, cols, back_func, parent_frame):
         else:
             table.insert("", "end", values=tuple(formatted_row))
 
+# Start the app
 if __name__ == "__main__":
     main_menu()
     app.mainloop()
