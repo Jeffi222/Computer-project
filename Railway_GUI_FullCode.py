@@ -164,8 +164,12 @@ def _create_add_train_content(parent_frame):
         if con:
             try:
                 cur = con.cursor()
-                cur.execute("INSERT INTO trains (train_name, source, destination) VALUES (%s, %s, %s)",
-                            (tname, src, dest))
+                cur.execute("SELECT train_id FROM trains ORDER BY train_id DESC LIMIT 1")
+                last_train_id = cur.fetchone()
+                new_train_id = last_train_id[0] + 1 if last_train_id else 1
+                
+                cur.execute("INSERT INTO trains (train_id, train_name, source, destination) VALUES (%s, %s, %s, %s)",
+                            (new_train_id, tname, src, dest))
                 con.commit()
                 messagebox.showinfo("Success", "Train added successfully!")
                 go_back(admin_menu)
@@ -418,10 +422,15 @@ def _create_book_ticket_content(parent_frame):
             try:
                 cur = con.cursor()
                 
-                cur.execute("INSERT INTO passenger (name, age, gender, phone_number) VALUES (%s, %s, %s, %s)",
-                            (p_name, p_age, p_gender, p_phone))
+                # Manual ID generation for passenger
+                cur.execute("SELECT passenger_id FROM passenger ORDER BY passenger_id DESC LIMIT 1")
+                last_passenger_id = cur.fetchone()
+                new_passenger_id = last_passenger_id[0] + 1 if last_passenger_id else 1
+                
+                cur.execute("INSERT INTO passenger (passenger_id, name, age, gender, phone_number) VALUES (%s, %s, %s, %s, %s)",
+                            (new_passenger_id, p_name, p_age, p_gender, p_phone))
                 con.commit()
-                passenger_id = cur.lastrowid
+                passenger_id = new_passenger_id
                 global current_passenger_id
                 current_passenger_id = passenger_id
 
@@ -429,9 +438,14 @@ def _create_book_ticket_content(parent_frame):
                             (train_id, travel_date, seat_num, selected_coach_type))
                 existing_reservation = cur.fetchone()
                 booking_status = "Waiting" if existing_reservation else "Confirmed"
+                
+                # Manual ID generation for reservations
+                cur.execute("SELECT reservation_id FROM reservations ORDER BY reservation_id DESC LIMIT 1")
+                last_reservation_id = cur.fetchone()
+                new_reservation_id = last_reservation_id[0] + 1 if last_reservation_id else 1
 
-                cur.execute("INSERT INTO reservations (passenger_id, train_id, travel_date, seat_number, booking_status, coach_type) VALUES (%s,%s,%s,%s,%s,%s)",
-                            (passenger_id, train_id, travel_date, seat_num, booking_status, selected_coach_type))
+                cur.execute("INSERT INTO reservations (reservation_id, passenger_id, train_id, travel_date, seat_number, booking_status, coach_type) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                            (new_reservation_id, passenger_id, train_id, travel_date, seat_num, booking_status, selected_coach_type))
                 con.commit()
 
                 messagebox.showinfo("Success", f"Ticket booked!\nYour Passenger ID: {passenger_id}\nBooking Status: {booking_status}")
@@ -609,3 +623,4 @@ def _show_table_data(rows, cols, back_func, parent_frame):
 if __name__ == "__main__":
     main_menu()
     app.mainloop()
+
