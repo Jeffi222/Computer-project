@@ -4,7 +4,6 @@ from tkinter import messagebox
 from tkinter import ttk
 import datetime
 
-# --- MySQL Connection ---
 def connect_db():
     try:
         return mysql.connector.connect(
@@ -17,21 +16,17 @@ def connect_db():
         messagebox.showerror("Database Connection Error", f"Failed to connect to database: {err}")
         return None
 
-# --- App Setup ---
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("dark-blue")
 
 app = ctk.CTk()
 app.title("Railway Management System")
-
 app.after(100, lambda: app.state('zoomed'))
-
 app.configure(fg_color="black")
 
 current_frame = None
 current_passenger_id = None
 
-# --- Frame Management Functions ---
 def clear_frame():
     global current_frame
     if current_frame:
@@ -61,7 +56,6 @@ def go_back(to_func):
 def logout():
     app.destroy()
 
-# --- Main Menu ---
 def main_menu():
     set_current_frame(lambda parent_frame: _create_main_menu_content(parent_frame))
 
@@ -78,7 +72,6 @@ def _create_main_menu_content(parent_frame):
     logout_btn = ctk.CTkButton(parent_frame, text="Exit App", fg_color="red", hover_color="#aa0000", corner_radius=20, width=250, height=60, command=logout)
     logout_btn.pack(pady=40)
 
-# --- Admin Login ---
 def admin_login_screen():
     set_current_frame(lambda parent_frame: _create_admin_login_content(parent_frame))
 
@@ -110,7 +103,6 @@ def _create_admin_login_content(parent_frame):
     back_btn = ctk.CTkButton(parent_frame, text="Back", corner_radius=20, command=lambda: go_back(main_menu))
     back_btn.pack()
 
-# --- Admin Menu ---
 def admin_menu():
     set_current_frame(lambda parent_frame: _create_admin_menu_content(parent_frame))
 
@@ -122,11 +114,12 @@ def _create_admin_menu_content(parent_frame):
         ("Add Train", add_train),
         ("Update Train", update_train),
         ("Delete Train", delete_train),
+        ("Add Bogie Capacity", add_bogie_capacity),
         ("View All Trains", view_trains),
         ("View Passengers", view_passengers),
         ("Delete Passenger", delete_passenger),
         ("View Reservations", view_reservations),
-        ("Cancel Reservation", cancel_reservation),
+        ("Cancel Reservation", cancel_reservation_admin),
         ("Logout", main_menu)
     ]
 
@@ -135,7 +128,6 @@ def _create_admin_menu_content(parent_frame):
         btn = ctk.CTkButton(parent_frame, text=name, command=func, width=250, height=50, corner_radius=20, fg_color=btn_color)
         btn.pack(pady=8)
 
-# --- ADMIN FUNCTIONS ---
 def add_train():
     set_current_frame(lambda parent_frame: _create_add_train_content(parent_frame))
 
@@ -164,14 +156,23 @@ def _create_add_train_content(parent_frame):
         if con:
             try:
                 cur = con.cursor()
-                cur.execute("SELECT train_id FROM trains ORDER BY train_id DESC LIMIT 1")
-                last_train_id = cur.fetchone()
-                new_train_id = last_train_id[0] + 1 if last_train_id else 1
                 
+                cur.execute("SELECT train_id FROM trains ORDER BY train_id DESC LIMIT 1")
+                last_row = cur.fetchone()
+                if last_row:
+                    new_train_id = last_row[0] + 1
+                else:
+                    new_train_id = 1
+
                 cur.execute("INSERT INTO trains (train_id, train_name, source, destination) VALUES (%s, %s, %s, %s)",
                             (new_train_id, tname, src, dest))
+                
+                DEFAULT_CAPACITY = 80
+                cur.execute("INSERT INTO bogie_capacity (train_id, seats_per_bogie) VALUES (%s, %s)",
+                            (new_train_id, DEFAULT_CAPACITY))
+
                 con.commit()
-                messagebox.showinfo("Success", "Train added successfully!")
+                messagebox.showinfo("Success", f"Train added successfully!\nTrain ID: {new_train_id}\nBogie Capacity: {DEFAULT_CAPACITY} seats per bogie.")
                 go_back(admin_menu)
             except mysql.connector.Error as err:
                 messagebox.showerror("Database Error", f"Error adding train: {err}")
@@ -261,7 +262,50 @@ def _create_delete_train_content(parent_frame):
                 cur.close()
                 con.close()
 
-    ctk.CTkButton(parent_frame, text="Delete", command=do_delete).pack(pady=10)
+def add_bogie_capacity():
+    set_current_frame(lambda parent_frame: _create_add_bogie_capacity_content(parent_frame))
+
+def _create_add_bogie_capacity_content(parent_frame):
+    ctk.CTkLabel(parent_frame, text="Add Bogie Capacity", font=("Arial", 24), text_color="white").pack(pady=10)
+
+    train_id_entry = ctk.CTkEntry(parent_frame, placeholder_text="Train ID", width=250)
+    train_id_entry.pack(pady=5)
+
+    capacity_entry = ctk.CTkEntry(parent_frame, placeholder_text="Seats per Bogie", width=250)
+    capacity_entry.pack(pady=5)
+
+    def do_add_capacity():
+        train_id = train_id_entry.get()
+        capacity = capacity_entry.get()
+
+        if not all([train_id, capacity]):
+            messagebox.showwarning("Input Error", "All fields are required!")
+            return
+
+        try:
+            train_id = int(train_id)
+            capacity = int(capacity)
+        except ValueError:
+            messagebox.showerror("Input Error", "Train ID and Capacity must be numbers.")
+            return
+
+        con = connect_db()
+        if con:
+            try:
+                cur = con.cursor()
+                cur.execute("INSERT INTO bogie_capacity (train_id, seats_per_bogie) VALUES (%s, %s) ON DUPLICATE KEY UPDATE seats_per_bogie = %s",
+                            (train_id, capacity, capacity))
+                con.commit()
+                messagebox.showinfo("Success", "Bogie capacity added successfully!")
+                go_back(admin_menu)
+            except mysql.connector.Error as err:
+                messagebox.showerror("Database Error", f"Error adding bogie capacity: {err}")
+                con.rollback()
+            finally:
+                cur.close()
+                con.close()
+
+    ctk.CTkButton(parent_frame, text="Add Capacity", command=do_add_capacity).pack(pady=10)
     ctk.CTkButton(parent_frame, text="Go Back", command=lambda: go_back(admin_menu)).pack()
 
 def view_trains():
@@ -276,10 +320,10 @@ def delete_passenger():
     _delete_generic("passenger", "passenger_id", admin_menu)
 
 def view_reservations():
-    _show_table("SELECT reservation_id, passenger_id, train_id, travel_date, seat_number, booking_status, coach_type FROM reservations",
-               ["ID", "Passenger ID", "Train ID", "Date", "Seat", "Status", "Coach Type"], admin_menu)
+    _show_table("SELECT reservation_id, passenger_id, train_id, travel_date, seat_number, booking_status, bogie_number FROM reservations",
+               ["ID", "Passenger ID", "Train ID", "Date", "Seat", "Status", "Bogie"], admin_menu)
 
-def cancel_reservation():
+def cancel_reservation_admin():
     _delete_generic("reservations", "reservation_id", admin_menu)
 
 def _delete_generic(table_name, id_column, back_func):
@@ -321,7 +365,6 @@ def __create_delete_generic_content(parent_frame, table_name, id_column, back_fu
     ctk.CTkButton(parent_frame, text="Delete", command=do_delete).pack(pady=10)
     ctk.CTkButton(parent_frame, text="Go Back", command=lambda: go_back(back_func)).pack()
 
-# --- USER FUNCTIONS ---
 def user_menu():
     set_current_frame(lambda parent_frame: _create_user_menu_content(parent_frame))
 
@@ -329,13 +372,91 @@ def _create_user_menu_content(parent_frame):
     ctk.CTkLabel(parent_frame, text="Welcome, Passenger", font=("Arial", 26), text_color="white").pack(pady=30)
 
     ctk.CTkButton(parent_frame, text="Book Ticket", command=book_ticket, width=250, height=50).pack(pady=10)
-    
     ctk.CTkButton(parent_frame, text="View My Reservation", command=view_user_reservation, width=250, height=50).pack(pady=10)
-    
+    ctk.CTkButton(parent_frame, text="Cancel My Ticket", command=cancel_user_reservation, width=250, height=50).pack(pady=10)
     ctk.CTkButton(parent_frame, text="Go Back", command=lambda: go_back(main_menu), width=250, height=50).pack(pady=10)
+
+def cancel_user_reservation():
+    set_current_frame(lambda parent_frame: _create_cancel_user_reservation_content(parent_frame))
+
+def _create_cancel_user_reservation_content(parent_frame):
+    ctk.CTkLabel(parent_frame, text="Cancel Your Ticket", font=("Arial", 24), text_color="white").pack(pady=10)
+
+    reservation_id_entry = ctk.CTkEntry(parent_frame, placeholder_text="Enter Reservation ID", width=250)
+    reservation_id_entry.pack(pady=5)
+
+    def confirm_cancellation():
+        reservation_id = reservation_id_entry.get()
+
+        if not reservation_id:
+            messagebox.showwarning("Input Error", "Please enter a Reservation ID.")
+            return
+
+        if not messagebox.askyesno("Confirm Cancellation", f"Are you sure you want to cancel reservation with ID {reservation_id}?"):
+            return
+
+        con = connect_db()
+        if con:
+            try:
+                cur = con.cursor()
+                cur.execute("DELETE FROM reservations WHERE reservation_id=%s", (reservation_id,))
+                con.commit()
+                if cur.rowcount > 0:
+                    messagebox.showinfo("Cancellation Successful", f"Reservation with ID {reservation_id} has been canceled.")
+                else:
+                    messagebox.showwarning("Not Found", f"No reservation found with ID {reservation_id}.")
+                go_back(user_menu)
+            except mysql.connector.Error as err:
+                messagebox.showerror("Database Error", f"Error canceling reservation: {err}")
+                con.rollback()
+            finally:
+                cur.close()
+                con.close()
+
+    ctk.CTkButton(parent_frame, text="Cancel Reservation", command=confirm_cancellation).pack(pady=10)
+    ctk.CTkButton(parent_frame, text="Go Back", command=lambda: go_back(user_menu)).pack()
 
 def book_ticket():
     set_current_frame(lambda parent_frame: _create_book_ticket_content(parent_frame))
+
+def allocate_seat_backend(train_id, travel_date):
+    con = connect_db()
+    if not con:
+        return None, None, "Error"
+    
+    try:
+        cur = con.cursor()
+        
+        cur.execute("SELECT seats_per_bogie FROM bogie_capacity WHERE train_id=%s", (train_id,))
+        capacity_row = cur.fetchone()
+        
+        if not capacity_row:
+            print(f"Warning: No bogie capacity defined for Train ID {train_id}.")
+            return None, None, 'No Capacity Defined'
+        
+        seats_per_bogie = capacity_row[0]
+        total_capacity = 20 * seats_per_bogie
+        
+        cur.execute("SELECT COUNT(*) FROM reservations WHERE train_id=%s AND travel_date=%s AND booking_status='Confirmed'",
+                    (train_id, travel_date))
+        confirmed_bookings = cur.fetchone()[0]
+        
+        if confirmed_bookings >= total_capacity:
+            return None, None, 'Waiting'
+        else:
+            seat_index = confirmed_bookings + 1
+            bogie_number = chr(ord('A') + (seat_index - 1) // seats_per_bogie)
+            seat_number = (seat_index - 1) % seats_per_bogie + 1
+            
+            return bogie_number, str(seat_number), 'Confirmed'
+    
+    except mysql.connector.Error as err:
+        print(f"Database Error in seat allocation: {err}")
+        return None, None, "Error"
+    finally:
+        if con and con.is_connected():
+            cur.close()
+            con.close()
 
 def _create_book_ticket_content(parent_frame):
     con = connect_db()
@@ -372,16 +493,8 @@ def _create_book_ticket_content(parent_frame):
     train_dropdown.set(train_display_options[0] if train_display_options else "No Trains Available")
     train_dropdown.pack(pady=5)
     
-    coach_type_options = ["AC", "Second AC", "Sleeper"]
-    coach_type_dropdown = ctk.CTkOptionMenu(parent_frame, values=coach_type_options)
-    coach_type_dropdown.set("Sleeper")
-    coach_type_dropdown.pack(pady=5)
-
     date_entry = ctk.CTkEntry(parent_frame, placeholder_text=f"Travel Date (YYYY-MM-DD, e.g., {datetime.date.today()})", width=250)
     date_entry.pack(pady=5)
-
-    seat_entry = ctk.CTkEntry(parent_frame, placeholder_text="Seat Number (e.g., A1-23)", width=250)
-    seat_entry.pack(pady=5)
 
     def confirm_booking():
         p_name = name_entry.get()
@@ -390,15 +503,9 @@ def _create_book_ticket_content(parent_frame):
         p_phone = phone_entry.get()
         selected_train_display = train_dropdown.get()
         travel_date_str = date_entry.get()
-        seat_num = seat_entry.get()
-        selected_coach_type = coach_type_dropdown.get()
 
-        if not all([p_name, p_age, p_gender, p_phone, selected_train_display, travel_date_str, seat_num, selected_coach_type]):
+        if not all([p_name, p_age, p_gender, p_phone, selected_train_display, travel_date_str]):
             messagebox.showwarning("Input Error", "All fields are required for booking!")
-            return
-        
-        if selected_coach_type not in coach_type_options:
-            messagebox.showwarning("Input Error", "Please select a valid coach type.")
             return
 
         try:
@@ -417,38 +524,44 @@ def _create_book_ticket_content(parent_frame):
         
         train_id = selected_train_info['id']
 
+        bogie_number, seat_num, booking_status = allocate_seat_backend(train_id, travel_date_str)
+        
+        if booking_status == 'Error':
+            messagebox.showerror("Booking Error", "An error occurred during seat allocation. Please try again.")
+            return
+        
+        if booking_status == 'No Capacity Defined':
+            messagebox.showerror("Booking Error", f"Capacity not defined for this train. Booking cannot be made.")
+            return
+
         con = connect_db()
         if con:
             try:
                 cur = con.cursor()
                 
-                # Manual ID generation for passenger
                 cur.execute("SELECT passenger_id FROM passenger ORDER BY passenger_id DESC LIMIT 1")
-                last_passenger_id = cur.fetchone()
-                new_passenger_id = last_passenger_id[0] + 1 if last_passenger_id else 1
+                last_row = cur.fetchone()
+                if last_row:
+                    passenger_id = last_row[0] + 1
+                else:
+                    passenger_id = 1
                 
                 cur.execute("INSERT INTO passenger (passenger_id, name, age, gender, phone_number) VALUES (%s, %s, %s, %s, %s)",
-                            (new_passenger_id, p_name, p_age, p_gender, p_phone))
+                            (passenger_id, p_name, p_age, p_gender, p_phone))
+                
                 con.commit()
-                passenger_id = new_passenger_id
                 global current_passenger_id
                 current_passenger_id = passenger_id
-
-                cur.execute("SELECT * FROM reservations WHERE train_id=%s AND travel_date=%s AND seat_number=%s AND coach_type=%s",
-                            (train_id, travel_date, seat_num, selected_coach_type))
-                existing_reservation = cur.fetchone()
-                booking_status = "Waiting" if existing_reservation else "Confirmed"
                 
-                # Manual ID generation for reservations
-                cur.execute("SELECT reservation_id FROM reservations ORDER BY reservation_id DESC LIMIT 1")
-                last_reservation_id = cur.fetchone()
-                new_reservation_id = last_reservation_id[0] + 1 if last_reservation_id else 1
-
-                cur.execute("INSERT INTO reservations (reservation_id, passenger_id, train_id, travel_date, seat_number, booking_status, coach_type) VALUES (%s,%s,%s,%s,%s,%s,%s)",
-                            (new_reservation_id, passenger_id, train_id, travel_date, seat_num, booking_status, selected_coach_type))
+                cur.execute("INSERT INTO reservations (passenger_id, train_id, travel_date, seat_number, booking_status, bogie_number) VALUES (%s,%s,%s,%s,%s,%s)",
+                            (passenger_id, train_id, travel_date, seat_num, booking_status, bogie_number))
                 con.commit()
+                
+                if booking_status == 'Confirmed':
+                    messagebox.showinfo("Success", f"Ticket booked!\nYour Passenger ID: {passenger_id}\nBogie: {bogie_number}\nSeat Number: {seat_num}")
+                else:
+                    messagebox.showinfo("Waitlist", "Train is full. You have been added to the waiting list.")
 
-                messagebox.showinfo("Success", f"Ticket booked!\nYour Passenger ID: {passenger_id}\nBooking Status: {booking_status}")
                 go_back(user_menu)
             except mysql.connector.Error as err:
                 messagebox.showerror("Database Error", f"Error making reservation: {err}")
@@ -457,9 +570,8 @@ def _create_book_ticket_content(parent_frame):
                 cur.close()
                 con.close()
 
-    ctk.CTkButton(parent_frame, text="Confirm Booking", command=confirm_booking).pack(pady=10)
-    ctk.CTkButton(parent_frame, text="Go Back", command=lambda: go_back(user_menu)).pack()
-
+    ctk.CTkButton(parent_frame, text="Confirm Booking", command=confirm_booking, width=150, height=30).pack(pady=10)
+    ctk.CTkButton(parent_frame, text="Go Back", command=lambda: go_back(user_menu), width=150, height=30).pack(pady=5)
 
 def view_user_reservation():
     set_current_frame(lambda parent_frame: _create_view_user_reservation_content(parent_frame))
@@ -509,7 +621,7 @@ def _create_view_user_reservation_content(parent_frame):
                         r.travel_date,
                         r.seat_number,
                         r.booking_status,
-                        r.coach_type
+                        r.bogie_number
                     FROM
                         reservations r
                     JOIN
@@ -524,7 +636,7 @@ def _create_view_user_reservation_content(parent_frame):
                     messagebox.showinfo("No Reservations", f"No reservations found for Passenger ID {passenger_id}.")
                 
                 cols = ["Reservation ID", "Passenger ID", "Train Name", "Source", "Destination",
-                        "Travel Date", "Seat Number", "Status", "Coach Type"]
+                        "Travel Date", "Seat Number", "Status", "Bogie"]
                 
                 _show_table_data(rows, cols, user_menu, parent_frame=table_display_area)
 
@@ -538,7 +650,6 @@ def _create_view_user_reservation_content(parent_frame):
     ctk.CTkButton(parent_frame, text="View", command=fetch_user_reservations).pack(pady=10)
     ctk.CTkButton(parent_frame, text="Go Back", command=lambda: go_back(user_menu)).pack(pady=10)
 
-# --- Shared Table Display Functions ---
 def _show_table(query, cols, back_func):
     set_current_frame(lambda parent_frame: __create_show_table_content(parent_frame, query, cols, back_func))
 
@@ -593,7 +704,7 @@ def _show_table_data(rows, cols, back_func, parent_frame):
             col_width = 70
         elif "Name" in col or "Source" in col or "Destination" in col:
             col_width = 150
-        elif "Date" in col or "Status" in col or "Coach Type" in col:
+        elif "Date" in col or "Status" in col or "Bogie" in col:
             col_width = 120
         elif "Phone" in col:
             col_width = 110
@@ -619,8 +730,6 @@ def _show_table_data(rows, cols, back_func, parent_frame):
         else:
             table.insert("", "end", values=tuple(formatted_row))
 
-# Start the app
 if __name__ == "__main__":
     main_menu()
     app.mainloop()
-
