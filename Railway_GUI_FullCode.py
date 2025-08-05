@@ -187,7 +187,7 @@ def _create_add_train_content(parent_frame):
                 sql = "INSERT INTO trains (train_id, train_name, source, destination, departure_time, arrival_time) VALUES (%s, %s, %s, %s, %s, %s)"
                 cur.execute(sql, (tid, tname, src, dest, dep_time, arr_time))
                 
-                DEFAULT_CAPACITY = 80
+                DEFAULT_CAPACITY = 100
                 cur.execute("INSERT INTO bogie_capacity (train_id, seats_per_bogie) VALUES (%s, %s)",
                             (tid, DEFAULT_CAPACITY))
 
@@ -527,14 +527,15 @@ def allocate_seat_backend(train_id, travel_date, coach_type):
     if not con:
         return None, None, "Error"
     
+    # Updated coach capacities
     COACH_CAPACITIES = {
-        "Sleeper": 72,
-        "3rd AC": 64,
-        "2nd AC": 46,
-        "1st AC": 24
+        "Sleeper": 100,
+        "Third AC": 80,
+        "Second AC": 46,
+        "First AC": 24
     }
     
-    seats_per_bogie = COACH_CAPACITIES.get(coach_type, 72)
+    seats_per_bogie = COACH_CAPACITIES.get(coach_type, 100)
     total_capacity = 20 * seats_per_bogie
     
     try:
@@ -599,9 +600,9 @@ def _create_book_ticket_content(parent_frame):
     train_dropdown.set(train_display_options[0])
     train_dropdown.pack(pady=5)
     
-    coach_type_options = ["Sleeper", "3rd AC", "2nd AC", "1st AC"]
+    coach_type_options = ["Sleeper", "Third AC", "Second AC", "First AC"]
     coach_type_dropdown = ctk.CTkOptionMenu(parent_frame, values=coach_type_options)
-    coach_type_dropdown.set("Sleeper")
+    coach_type_dropdown.set(coach_type_options[0])
     coach_type_dropdown.pack(pady=5)
 
     ctk.CTkLabel(parent_frame, text="Select Travel Date:", text_color="white").pack(pady=(10, 5))
