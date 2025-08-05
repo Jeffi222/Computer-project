@@ -403,8 +403,8 @@ def delete_passenger():
     _delete_generic("passenger", "passenger_id", admin_menu)
 
 def view_reservations():
-    _show_table("SELECT reservation_id, passenger_id, train_id, travel_date, seat_number, booking_status, bogie_number FROM reservations",
-                ["ID", "Passenger ID", "Train ID", "Date", "Seat", "Status", "Bogie"], admin_menu)
+    _show_table("SELECT reservation_id, passenger_id, train_id, travel_date, seat_number, booking_status, bogie_number, coach_type FROM reservations",
+                ["ID", "Passenger ID", "Train ID", "Date", "Seat", "Status", "Bogie", "Coach Type"], admin_menu)
 
 def cancel_reservation_admin():
     _delete_generic("reservations", "reservation_id", admin_menu)
@@ -522,26 +522,26 @@ def _create_cancel_user_reservation_content(parent_frame):
 def book_ticket():
     set_current_frame(lambda parent_frame: _create_book_ticket_content(parent_frame))
 
-def allocate_seat_backend(train_id, travel_date):
+def allocate_seat_backend(train_id, travel_date, coach_type):
     con = connect_db()
     if not con:
         return None, None, "Error"
     
+    COACH_CAPACITIES = {
+        "Sleeper": 72,
+        "3rd AC": 64,
+        "2nd AC": 46,
+        "1st AC": 24
+    }
+    
+    seats_per_bogie = COACH_CAPACITIES.get(coach_type, 72)
+    total_capacity = 20 * seats_per_bogie
+    
     try:
         cur = con.cursor()
         
-        cur.execute("SELECT seats_per_bogie FROM bogie_capacity WHERE train_id=%s", (train_id,))
-        capacity_row = cur.fetchone()
-        
-        if not capacity_row:
-            print(f"Warning: No bogie capacity defined for Train ID {train_id}.")
-            return None, None, 'No Capacity Defined'
-        
-        seats_per_bogie = capacity_row[0]
-        total_capacity = 20 * seats_per_bogie
-        
-        cur.execute("SELECT COUNT(*) FROM reservations WHERE train_id=%s AND travel_date=%s AND booking_status='Confirmed'",
-                    (train_id, travel_date))
+        cur.execute("SELECT COUNT(*) FROM reservations WHERE train_id=%s AND travel_date=%s AND coach_type=%s AND booking_status='Confirmed'",
+                    (train_id, travel_date, coach_type))
         confirmed_bookings = cur.fetchone()[0]
         
         if confirmed_bookings >= total_capacity:
@@ -599,6 +599,11 @@ def _create_book_ticket_content(parent_frame):
     train_dropdown.set(train_display_options[0])
     train_dropdown.pack(pady=5)
     
+    coach_type_options = ["Sleeper", "3rd AC", "2nd AC", "1st AC"]
+    coach_type_dropdown = ctk.CTkOptionMenu(parent_frame, values=coach_type_options)
+    coach_type_dropdown.set("Sleeper")
+    coach_type_dropdown.pack(pady=5)
+
     ctk.CTkLabel(parent_frame, text="Select Travel Date:", text_color="white").pack(pady=(10, 5))
     calendar_frame = ctk.CTkFrame(parent_frame, fg_color="black")
     calendar_frame.pack(pady=5)
@@ -613,10 +618,11 @@ def _create_book_ticket_content(parent_frame):
         p_gender = gender_entry.get()
         p_phone = phone_entry.get()
         selected_train_display = train_dropdown.get()
+        selected_coach_type = coach_type_dropdown.get()
         
         travel_date_str = calendar.get_date()
         
-        if not all([p_name, p_age, p_gender, p_phone, selected_train_display, travel_date_str]):
+        if not all([p_name, p_age, p_gender, p_phone, selected_train_display, selected_coach_type, travel_date_str]):
             messagebox.showwarning("Input Error", "All fields are required for booking!")
             return
 
@@ -629,14 +635,19 @@ def _create_book_ticket_content(parent_frame):
             messagebox.showerror("Input Error", f"Invalid input: {e}\nAge must be a number.")
             return
         
-        selected_train_info = train_map.get(selected_train_display.split(" - ")[0])
+        selected_train_info = None
+        for display_string, info in train_map.items():
+            if selected_train_display.startswith(display_string):
+                selected_train_info = info
+                break
+        
         if not selected_train_info:
             messagebox.showerror("Booking Error", "Selected train information not found.")
             return
         
         train_id = selected_train_info['id']
 
-        bogie_number, seat_num, booking_status = allocate_seat_backend(train_id, travel_date_str)
+        bogie_number, seat_num, booking_status = allocate_seat_backend(train_id, travel_date_str, selected_coach_type)
         
         if booking_status == 'Error':
             messagebox.showerror("Booking Error", "An error occurred during seat allocation. Please try again.")
@@ -671,12 +682,12 @@ def _create_book_ticket_content(parent_frame):
                 global current_passenger_id
                 current_passenger_id = passenger_id
                 
-                cur.execute("INSERT INTO reservations (reservation_id, passenger_id, train_id, travel_date, seat_number, booking_status, bogie_number) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                            (reservation_id, passenger_id, train_id, travel_date, seat_num, booking_status, bogie_number))
+                cur.execute("INSERT INTO reservations (reservation_id, passenger_id, train_id, travel_date, seat_number, booking_status, bogie_number, coach_type) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                            (reservation_id, passenger_id, train_id, travel_date, seat_num, booking_status, bogie_number, selected_coach_type))
                 con.commit()
                 
                 if booking_status == 'Confirmed':
-                    messagebox.showinfo("Success", f"Ticket booked!\nYour Passenger ID: {passenger_id}\nReservation ID: {reservation_id}\nBogie: {bogie_number}\nSeat Number: {seat_num}")
+                    messagebox.showinfo("Success", f"Ticket booked!\nYour Passenger ID: {passenger_id}\nReservation ID: {reservation_id}\nBogie: {bogie_number}\nSeat Number: {seat_num}\nCoach Type: {selected_coach_type}")
                 else:
                     messagebox.showinfo("Waitlist", f"Train is full. You have been added to the waiting list with Reservation ID: {reservation_id}.")
 
@@ -736,6 +747,7 @@ def _create_view_user_reservation_content(parent_frame):
                         t.train_name,
                         t.source,
                         t.destination,
+                        r.coach_type,
                         t.departure_time,
                         t.arrival_time,
                         r.travel_date,
@@ -756,7 +768,7 @@ def _create_view_user_reservation_content(parent_frame):
                     messagebox.showinfo("No Reservations", f"No reservations found for Passenger ID {passenger_id}.")
                 
                 cols = ["Reservation ID", "Passenger ID", "Train Name", "Source", "Destination",
-                        "Departure Time", "Arrival Time", "Travel Date", "Seat Number", "Status", "Bogie"]
+                        "Coach Type", "Departure Time", "Arrival Time", "Travel Date", "Seat Number", "Status", "Bogie"]
                 
                 _show_table_data(rows, cols, user_menu, parent_frame=table_display_area)
 
@@ -839,7 +851,7 @@ def _show_table_data(rows, cols, back_func, parent_frame):
             col_width = 70
         elif "Name" in col or "Source" in col or "Destination" in col:
             col_width = 150
-        elif "Date" in col or "Status" in col or "Bogie" in col:
+        elif "Date" in col or "Status" in col or "Bogie" in col or "Coach" in col:
             col_width = 120
         elif "Phone" in col:
             col_width = 110
@@ -847,7 +859,7 @@ def _show_table_data(rows, cols, back_func, parent_frame):
             col_width = 100
 
         table.column(col, width=col_width, anchor="center")
-        if "Name" in col or "Source" in col or "Destination" in col:
+        if "Name" in col or "Source" in col or "Destination" in col or "Coach" in col:
             table.column(col, anchor="w")
 
     for row in rows:
