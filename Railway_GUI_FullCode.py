@@ -1,17 +1,20 @@
 import customtkinter as ctk
 import mysql.connector
-from tkinter import messagebox
-from tkinter import ttk
+from tkinter import messagebox, simpledialog, ttk
 import datetime
+from tkcalendar import Calendar
+from mysql.connector import errorcode
+
+db_config = {
+    'user': 'root',
+    'password': '1234',
+    'host': 'localhost',
+    'database': 'Railway_mgmt'
+}
 
 def connect_db():
     try:
-        return mysql.connector.connect(
-            host="localhost",
-            user="root",
-            password="1234",
-            database="Railway_mgmt"
-        )
+        return mysql.connector.connect(**db_config)
     except mysql.connector.Error as err:
         messagebox.showerror("Database Connection Error", f"Failed to connect to database: {err}")
         return None
@@ -114,7 +117,7 @@ def _create_admin_menu_content(parent_frame):
         ("Add Train", add_train),
         ("Update Train", update_train),
         ("Delete Train", delete_train),
-        ("Add Bogie Capacity", add_bogie_capacity),
+        ("Add/Update Bogie Capacity", add_bogie_capacity),
         ("View All Trains", view_trains),
         ("View Passengers", view_passengers),
         ("Delete Passenger", delete_passenger),
@@ -134,22 +137,41 @@ def add_train():
 def _create_add_train_content(parent_frame):
     ctk.CTkLabel(parent_frame, text="Add Train", font=("Arial", 24), text_color="white").pack(pady=10)
 
+    tid_entry = ctk.CTkEntry(parent_frame, placeholder_text="Train ID (e.g., 101)", width=250)
+    tid_entry.pack(pady=5)
     tname_entry = ctk.CTkEntry(parent_frame, placeholder_text="Train Name", width=250)
     tname_entry.pack(pady=5)
-
     src_entry = ctk.CTkEntry(parent_frame, placeholder_text="Source", width=250)
     src_entry.pack(pady=5)
-
     dest_entry = ctk.CTkEntry(parent_frame, placeholder_text="Destination", width=250)
     dest_entry.pack(pady=5)
     
+    ctk.CTkLabel(parent_frame, text="Departure Time (HH:MM:SS):", text_color="white").pack(pady=(10, 0))
+    dep_time_entry = ctk.CTkEntry(parent_frame, placeholder_text="e.g., 08:30:00", width=250)
+    dep_time_entry.pack(pady=5)
+    
+    ctk.CTkLabel(parent_frame, text="Arrival Time (HH:MM:SS):", text_color="white").pack(pady=(10, 0))
+    arr_time_entry = ctk.CTkEntry(parent_frame, placeholder_text="e.g., 18:00:00", width=250)
+    arr_time_entry.pack(pady=5)
+
     def insert_train_db():
+        tid = tid_entry.get()
         tname = tname_entry.get()
         src = src_entry.get()
         dest = dest_entry.get()
+        dep_time = dep_time_entry.get()
+        arr_time = arr_time_entry.get()
 
-        if not all([tname, src, dest]):
+        if not all([tid, tname, src, dest, dep_time, arr_time]):
             messagebox.showwarning("Input Error", "All fields are required!")
+            return
+        
+        try:
+            tid = int(tid)
+            datetime.datetime.strptime(dep_time, '%H:%M:%S').time()
+            datetime.datetime.strptime(arr_time, '%H:%M:%S').time()
+        except ValueError:
+            messagebox.showerror("Input Error", "Train ID must be an integer and times must be in HH:MM:SS format.")
             return
 
         con = connect_db()
@@ -157,22 +179,20 @@ def _create_add_train_content(parent_frame):
             try:
                 cur = con.cursor()
                 
-                cur.execute("SELECT train_id FROM trains ORDER BY train_id DESC LIMIT 1")
-                last_row = cur.fetchone()
-                if last_row:
-                    new_train_id = last_row[0] + 1
-                else:
-                    new_train_id = 1
+                cur.execute("SELECT train_id FROM trains WHERE train_id = %s", (tid,))
+                if cur.fetchone():
+                    messagebox.showerror("Input Error", f"Train with ID {tid} already exists.")
+                    return
 
-                cur.execute("INSERT INTO trains (train_id, train_name, source, destination) VALUES (%s, %s, %s, %s)",
-                            (new_train_id, tname, src, dest))
+                sql = "INSERT INTO trains (train_id, train_name, source, destination, departure_time, arrival_time) VALUES (%s, %s, %s, %s, %s, %s)"
+                cur.execute(sql, (tid, tname, src, dest, dep_time, arr_time))
                 
                 DEFAULT_CAPACITY = 80
                 cur.execute("INSERT INTO bogie_capacity (train_id, seats_per_bogie) VALUES (%s, %s)",
-                            (new_train_id, DEFAULT_CAPACITY))
+                            (tid, DEFAULT_CAPACITY))
 
                 con.commit()
-                messagebox.showinfo("Success", f"Train added successfully!\nTrain ID: {new_train_id}\nBogie Capacity: {DEFAULT_CAPACITY} seats per bogie.")
+                messagebox.showinfo("Success", f"Train added successfully!\nTrain ID: {tid}\nBogie Capacity: {DEFAULT_CAPACITY} seats per bogie.")
                 go_back(admin_menu)
             except mysql.connector.Error as err:
                 messagebox.showerror("Database Error", f"Error adding train: {err}")
@@ -189,42 +209,102 @@ def update_train():
 
 def _create_update_train_content(parent_frame):
     ctk.CTkLabel(parent_frame, text="Update Train", font=("Arial", 24), text_color="white").pack(pady=10)
-
-    tid_entry = ctk.CTkEntry(parent_frame, placeholder_text="Train ID", width=250)
-    tid_entry.pack(pady=5)
-
-    new_name_entry = ctk.CTkEntry(parent_frame, placeholder_text="New Train Name", width=250)
-    new_name_entry.pack(pady=5)
-
-    def do_update():
+    
+    frame_load = ctk.CTkFrame(parent_frame, fg_color="transparent")
+    frame_load.pack(pady=10)
+    tid_entry = ctk.CTkEntry(frame_load, placeholder_text="Train ID", width=150)
+    tid_entry.pack(side="left", padx=5)
+    
+    update_fields_frame = ctk.CTkFrame(parent_frame, fg_color="transparent")
+    
+    def load_train_details():
         train_id = tid_entry.get()
-        new_name = new_name_entry.get()
-
-        if not all([train_id, new_name]):
-            messagebox.showwarning("Input Error", "All fields are required!")
+        if not train_id:
+            messagebox.showwarning("Input Error", "Please enter a Train ID.")
             return
-
+        
         con = connect_db()
         if con:
             try:
                 cur = con.cursor()
-                cur.execute("UPDATE trains SET train_name=%s WHERE train_id=%s",
-                            (new_name, train_id))
-                con.commit()
-                if cur.rowcount > 0:
-                    messagebox.showinfo("Updated", "Train name updated.")
+                cur.execute("SELECT train_name, source, destination, departure_time, arrival_time FROM trains WHERE train_id=%s", (train_id,))
+                train_data = cur.fetchone()
+                
+                if train_data:
+                    for widget in update_fields_frame.winfo_children():
+                        widget.destroy()
+                    update_fields_frame.pack(pady=10)
+                    
+                    new_name_entry = ctk.CTkEntry(update_fields_frame, placeholder_text="New Train Name", width=250)
+                    new_name_entry.insert(0, train_data[0])
+                    new_name_entry.pack(pady=5)
+                    
+                    new_src_entry = ctk.CTkEntry(update_fields_frame, placeholder_text="New Source", width=250)
+                    new_src_entry.insert(0, train_data[1])
+                    new_src_entry.pack(pady=5)
+                    
+                    new_dest_entry = ctk.CTkEntry(update_fields_frame, placeholder_text="New Destination", width=250)
+                    new_dest_entry.insert(0, train_data[2])
+                    new_dest_entry.pack(pady=5)
+                    
+                    ctk.CTkLabel(update_fields_frame, text="New Departure Time (HH:MM:SS):", text_color="white").pack(pady=(10, 0))
+                    new_dep_time_entry = ctk.CTkEntry(update_fields_frame, placeholder_text="e.g., 08:30:00", width=250)
+                    new_dep_time_entry.insert(0, str(train_data[3]))
+                    new_dep_time_entry.pack(pady=5)
+                    
+                    ctk.CTkLabel(update_fields_frame, text="New Arrival Time (HH:MM:SS):", text_color="white").pack(pady=(10, 0))
+                    new_arr_time_entry = ctk.CTkEntry(update_fields_frame, placeholder_text="e.g., 18:00:00", width=250)
+                    new_arr_time_entry.insert(0, str(train_data[4]))
+                    new_arr_time_entry.pack(pady=5)
+                    
+                    update_btn = ctk.CTkButton(update_fields_frame, text="Update", command=lambda: do_update(train_id, new_name_entry.get(), new_src_entry.get(), new_dest_entry.get(), new_dep_time_entry.get(), new_arr_time_entry.get()))
+                    update_btn.pack(pady=10)
                 else:
+                    for widget in update_fields_frame.winfo_children():
+                        widget.destroy()
                     messagebox.showwarning("Not Found", "No train found with the given ID.")
-                go_back(admin_menu)
+
             except mysql.connector.Error as err:
-                messagebox.showerror("Database Error", f"Error updating train: {err}")
-                con.rollback()
+                messagebox.showerror("Database Error", f"Error fetching train details: {err}")
             finally:
                 cur.close()
                 con.close()
 
-    ctk.CTkButton(parent_frame, text="Update", command=do_update).pack(pady=10)
-    ctk.CTkButton(parent_frame, text="Go Back", command=lambda: go_back(admin_menu)).pack()
+    ctk.CTkButton(frame_load, text="Load Details", command=load_train_details, width=120).pack(side="left", padx=5)
+    ctk.CTkButton(parent_frame, text="Go Back", command=lambda: go_back(admin_menu)).pack(pady=10)
+
+def do_update(train_id, new_name, new_src, new_dest, new_dep_time, new_arr_time):
+    if not all([train_id, new_name, new_src, new_dest, new_dep_time, new_arr_time]):
+        messagebox.showwarning("Input Error", "All fields are required!")
+        return
+
+    try:
+        datetime.datetime.strptime(new_dep_time, '%H:%M:%S').time()
+        datetime.datetime.strptime(new_arr_time, '%H:%M:%S').time()
+    except ValueError:
+        messagebox.showerror("Input Error", "Times must be in HH:MM:SS format.")
+        return
+
+    con = connect_db()
+    if con:
+        try:
+            cur = con.cursor()
+            cur.execute("UPDATE trains SET train_name=%s, source=%s, destination=%s, departure_time=%s, arrival_time=%s WHERE train_id=%s",
+                        (new_name, new_src, new_dest, new_dep_time, new_arr_time, train_id))
+            con.commit()
+            if cur.rowcount > 0:
+                messagebox.showinfo("Updated", "Train details updated.")
+                go_back(admin_menu)
+            else:
+                messagebox.showwarning("Not Found", "No train found with the given ID.")
+                go_back(update_train)
+        except mysql.connector.Error as err:
+            messagebox.showerror("Database Error", f"Error updating train: {err}")
+            con.rollback()
+            go_back(update_train)
+        finally:
+            cur.close()
+            con.close()
 
 def delete_train():
     set_current_frame(lambda parent_frame: _create_delete_train_content(parent_frame))
@@ -261,6 +341,9 @@ def _create_delete_train_content(parent_frame):
             finally:
                 cur.close()
                 con.close()
+
+    ctk.CTkButton(parent_frame, text="Delete", command=do_delete).pack(pady=10)
+    ctk.CTkButton(parent_frame, text="Go Back", command=lambda: go_back(admin_menu)).pack()
 
 def add_bogie_capacity():
     set_current_frame(lambda parent_frame: _create_add_bogie_capacity_content(parent_frame))
@@ -309,19 +392,19 @@ def _create_add_bogie_capacity_content(parent_frame):
     ctk.CTkButton(parent_frame, text="Go Back", command=lambda: go_back(admin_menu)).pack()
 
 def view_trains():
-    _show_table("SELECT train_id, train_name, source, destination FROM trains",
-               ["ID", "Name", "From", "To"], admin_menu)
+    _show_table("SELECT train_id, train_name, source, destination, departure_time, arrival_time FROM trains",
+                ["ID", "Name", "From", "To", "Departure", "Arrival"], admin_menu)
 
 def view_passengers():
     _show_table("SELECT passenger_id, name, age, gender, phone_number FROM passenger",
-               ["ID", "Name", "Age", "Gender", "Phone"], admin_menu)
+                ["ID", "Name", "Age", "Gender", "Phone"], admin_menu)
 
 def delete_passenger():
     _delete_generic("passenger", "passenger_id", admin_menu)
 
 def view_reservations():
     _show_table("SELECT reservation_id, passenger_id, train_id, travel_date, seat_number, booking_status, bogie_number FROM reservations",
-               ["ID", "Passenger ID", "Train ID", "Date", "Seat", "Status", "Bogie"], admin_menu)
+                ["ID", "Passenger ID", "Train ID", "Date", "Seat", "Status", "Bogie"], admin_menu)
 
 def cancel_reservation_admin():
     _delete_generic("reservations", "reservation_id", admin_menu)
@@ -399,19 +482,39 @@ def _create_cancel_user_reservation_content(parent_frame):
         if con:
             try:
                 cur = con.cursor()
-                cur.execute("DELETE FROM reservations WHERE reservation_id=%s", (reservation_id,))
-                con.commit()
-                if cur.rowcount > 0:
-                    messagebox.showinfo("Cancellation Successful", f"Reservation with ID {reservation_id} has been canceled.")
-                else:
+                
+                cur.execute("SELECT passenger_id FROM reservations WHERE reservation_id = %s", (reservation_id,))
+                passenger_id_to_delete = cur.fetchone()
+                
+                if not passenger_id_to_delete:
                     messagebox.showwarning("Not Found", f"No reservation found with ID {reservation_id}.")
+                    con.close()
+                    return
+                
+                passenger_id = passenger_id_to_delete[0]
+
+                cur.execute("DELETE FROM reservations WHERE reservation_id=%s", (reservation_id,))
+                
+                cur.execute("SELECT COUNT(*) FROM reservations WHERE passenger_id=%s", (passenger_id,))
+                other_reservations = cur.fetchone()[0]
+
+                if other_reservations == 0:
+                    cur.execute("DELETE FROM passenger WHERE passenger_id=%s", (passenger_id,))
+                    con.commit()
+                    messagebox.showinfo("Cancellation Successful", f"Reservation with ID {reservation_id} and the corresponding passenger record have been canceled.")
+                else:
+                    con.commit()
+                    messagebox.showinfo("Cancellation Successful", f"Reservation with ID {reservation_id} has been canceled.")
+                
                 go_back(user_menu)
+
             except mysql.connector.Error as err:
                 messagebox.showerror("Database Error", f"Error canceling reservation: {err}")
                 con.rollback()
             finally:
-                cur.close()
-                con.close()
+                if con and con.is_connected():
+                    cur.close()
+                    con.close()
 
     ctk.CTkButton(parent_frame, text="Cancel Reservation", command=confirm_cancellation).pack(pady=10)
     ctk.CTkButton(parent_frame, text="Go Back", command=lambda: go_back(user_menu)).pack()
@@ -464,7 +567,7 @@ def _create_book_ticket_content(parent_frame):
     if con:
         try:
             cur = con.cursor()
-            cur.execute("SELECT train_id, train_name, source, destination FROM trains")
+            cur.execute("SELECT train_id, train_name, source, destination, departure_time, arrival_time FROM trains")
             train_options_data = cur.fetchall()
         except mysql.connector.Error as err:
             messagebox.showerror("Database Error", f"Error fetching trains: {err}")
@@ -472,8 +575,11 @@ def _create_book_ticket_content(parent_frame):
             cur.close()
             con.close()
 
-    train_map = {f"{t[1]} ({t[2]} ➜ {t[3]})": {'id': t[0]} for t in train_options_data}
-    train_display_options = list(train_map.keys())
+    train_map = {f"{t[1]} ({t[2]} ➜ {t[3]})": {'id': t[0], 'departure': t[4], 'arrival': t[5]} for t in train_options_data}
+    train_display_options = [f"{t[1]} ({t[2]} ➜ {t[3]}) - Dep: {t[4]} / Arr: {t[5]}" for t in train_options_data]
+    
+    if not train_display_options:
+        train_display_options = ["No Trains Available"]
 
     ctk.CTkLabel(parent_frame, text="Book Ticket", font=("Arial", 24), text_color="white").pack(pady=10)
 
@@ -489,21 +595,27 @@ def _create_book_ticket_content(parent_frame):
     phone_entry = ctk.CTkEntry(parent_frame, placeholder_text="Phone Number", width=250)
     phone_entry.pack(pady=5)
 
-    train_dropdown = ctk.CTkOptionMenu(parent_frame, values=train_display_options if train_display_options else ["No Trains Available"])
-    train_dropdown.set(train_display_options[0] if train_display_options else "No Trains Available")
+    train_dropdown = ctk.CTkOptionMenu(parent_frame, values=train_display_options)
+    train_dropdown.set(train_display_options[0])
     train_dropdown.pack(pady=5)
     
-    date_entry = ctk.CTkEntry(parent_frame, placeholder_text=f"Travel Date (YYYY-MM-DD, e.g., {datetime.date.today()})", width=250)
-    date_entry.pack(pady=5)
-
+    ctk.CTkLabel(parent_frame, text="Select Travel Date:", text_color="white").pack(pady=(10, 5))
+    calendar_frame = ctk.CTkFrame(parent_frame, fg_color="black")
+    calendar_frame.pack(pady=5)
+    calendar = Calendar(calendar_frame, selectmode='day', date_pattern='yyyy-mm-dd', background="#343638", bordercolor="#343638",
+                        headersbackground="#343638", normalbackground="#343638", foreground="white", headersforeground="white",
+                        normalforeground="white", selectbackground="#1f538d", selectforeground="white")
+    calendar.pack()
+    
     def confirm_booking():
         p_name = name_entry.get()
         p_age = age_entry.get()
         p_gender = gender_entry.get()
         p_phone = phone_entry.get()
         selected_train_display = train_dropdown.get()
-        travel_date_str = date_entry.get()
-
+        
+        travel_date_str = calendar.get_date()
+        
         if not all([p_name, p_age, p_gender, p_phone, selected_train_display, travel_date_str]):
             messagebox.showwarning("Input Error", "All fields are required for booking!")
             return
@@ -514,10 +626,10 @@ def _create_book_ticket_content(parent_frame):
                 raise ValueError("Age must be a positive number.")
             travel_date = datetime.date.fromisoformat(travel_date_str)
         except ValueError as e:
-            messagebox.showerror("Input Error", f"Invalid input: {e}\nAge must be a number and Date must be YYYY-MM-DD.")
+            messagebox.showerror("Input Error", f"Invalid input: {e}\nAge must be a number.")
             return
         
-        selected_train_info = train_map.get(selected_train_display)
+        selected_train_info = train_map.get(selected_train_display.split(" - ")[0])
         if not selected_train_info:
             messagebox.showerror("Booking Error", "Selected train information not found.")
             return
@@ -540,27 +652,33 @@ def _create_book_ticket_content(parent_frame):
                 cur = con.cursor()
                 
                 cur.execute("SELECT passenger_id FROM passenger ORDER BY passenger_id DESC LIMIT 1")
-                last_row = cur.fetchone()
-                if last_row:
-                    passenger_id = last_row[0] + 1
+                last_p_id = cur.fetchone()
+                if last_p_id:
+                    passenger_id = last_p_id[0] + 1
                 else:
                     passenger_id = 1
                 
                 cur.execute("INSERT INTO passenger (passenger_id, name, age, gender, phone_number) VALUES (%s, %s, %s, %s, %s)",
                             (passenger_id, p_name, p_age, p_gender, p_phone))
                 
-                con.commit()
+                cur.execute("SELECT reservation_id FROM reservations ORDER BY reservation_id DESC LIMIT 1")
+                last_res_id = cur.fetchone()
+                if last_res_id:
+                    reservation_id = last_res_id[0] + 1
+                else:
+                    reservation_id = 1
+                
                 global current_passenger_id
                 current_passenger_id = passenger_id
                 
-                cur.execute("INSERT INTO reservations (passenger_id, train_id, travel_date, seat_number, booking_status, bogie_number) VALUES (%s,%s,%s,%s,%s,%s)",
-                            (passenger_id, train_id, travel_date, seat_num, booking_status, bogie_number))
+                cur.execute("INSERT INTO reservations (reservation_id, passenger_id, train_id, travel_date, seat_number, booking_status, bogie_number) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                            (reservation_id, passenger_id, train_id, travel_date, seat_num, booking_status, bogie_number))
                 con.commit()
                 
                 if booking_status == 'Confirmed':
-                    messagebox.showinfo("Success", f"Ticket booked!\nYour Passenger ID: {passenger_id}\nBogie: {bogie_number}\nSeat Number: {seat_num}")
+                    messagebox.showinfo("Success", f"Ticket booked!\nYour Passenger ID: {passenger_id}\nReservation ID: {reservation_id}\nBogie: {bogie_number}\nSeat Number: {seat_num}")
                 else:
-                    messagebox.showinfo("Waitlist", "Train is full. You have been added to the waiting list.")
+                    messagebox.showinfo("Waitlist", f"Train is full. You have been added to the waiting list with Reservation ID: {reservation_id}.")
 
                 go_back(user_menu)
             except mysql.connector.Error as err:
@@ -618,6 +736,8 @@ def _create_view_user_reservation_content(parent_frame):
                         t.train_name,
                         t.source,
                         t.destination,
+                        t.departure_time,
+                        t.arrival_time,
                         r.travel_date,
                         r.seat_number,
                         r.booking_status,
@@ -636,7 +756,7 @@ def _create_view_user_reservation_content(parent_frame):
                     messagebox.showinfo("No Reservations", f"No reservations found for Passenger ID {passenger_id}.")
                 
                 cols = ["Reservation ID", "Passenger ID", "Train Name", "Source", "Destination",
-                        "Travel Date", "Seat Number", "Status", "Bogie"]
+                        "Departure Time", "Arrival Time", "Travel Date", "Seat Number", "Status", "Bogie"]
                 
                 _show_table_data(rows, cols, user_menu, parent_frame=table_display_area)
 
@@ -685,6 +805,21 @@ def _show_table_data(rows, cols, back_func, parent_frame):
 
     table = ttk.Treeview(parent_frame, columns=cols, show="headings")
     
+    style = ttk.Style(parent_frame)
+    style.theme_use("clam")
+    style.configure("Treeview", 
+                    background="#2b2b2b", 
+                    foreground="white",
+                    fieldbackground="#2b2b2b",
+                    borderwidth=0)
+    style.map('Treeview', 
+              background=[('selected', '#1f538d')])
+    
+    style.configure("Treeview.Heading",
+                    background="#1f538d",
+                    foreground="white",
+                    font=('Arial', 10, 'bold'))
+
     vsb = ttk.Scrollbar(parent_frame, orient="vertical", command=table.yview)
     hsb = ttk.Scrollbar(parent_frame, orient="horizontal", command=table.xview)
     table.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
@@ -708,6 +843,8 @@ def _show_table_data(rows, cols, back_func, parent_frame):
             col_width = 120
         elif "Phone" in col:
             col_width = 110
+        elif "Time" in col:
+            col_width = 100
 
         table.column(col, width=col_width, anchor="center")
         if "Name" in col or "Source" in col or "Destination" in col:
@@ -718,6 +855,8 @@ def _show_table_data(rows, cols, back_func, parent_frame):
         for item in row:
             if isinstance(item, datetime.date):
                 formatted_row.append(item.strftime("%Y-%m-%d"))
+            elif isinstance(item, datetime.time):
+                formatted_row.append(item.strftime("%H:%M:%S"))
             else:
                 formatted_row.append(str(item))
 
